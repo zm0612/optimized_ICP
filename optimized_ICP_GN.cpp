@@ -74,8 +74,6 @@ bool OptimizedICPGN::Match(const CloudData::CLOUD_PTR &source_cloud_ptr, const E
 
         T.block<3, 1>(0, 3) = T.block<3, 1>(0, 3) + delta_x.head(3);
         T.block<3, 3>(0, 0) *= Sophus::SO3f::exp(delta_x.tail(3)).matrix();
-
-        i++;
     }
 
     final_transformation_ = T;
