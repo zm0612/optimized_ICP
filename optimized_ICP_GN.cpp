@@ -2,24 +2,25 @@
 // Created by meng on 2021/3/25.
 //
 #include "optimized_ICP_GN.h"
-#include "sophus/se3.hpp"
+#include "common.h"
 
-OptimizedICPGN::OptimizedICPGN(const YAML::Node &config)
-        : kdtree_flann_ptr_(new pcl::KdTreeFLANN<CloudData::POINT>) {
-    max_iterations_ = config["max_iterations"].as<unsigned int>();
-    max_correspond_distance_ = config["max_correspond_distance"].as<float>();
+OptimizedICPGN::OptimizedICPGN()
+        : kdtree_flann_ptr_(new pcl::KdTreeFLANN<pcl::PointXYZI>) {
 }
 
-bool OptimizedICPGN::SetTargetCloud(const CloudData::CLOUD_PTR &target_cloud_ptr) {
+bool OptimizedICPGN::SetTargetCloud(const pcl::PointCloud<pcl::PointXYZI>::Ptr &target_cloud_ptr) {
     target_cloud_ptr_ = target_cloud_ptr;
     kdtree_flann_ptr_->setInputCloud(target_cloud_ptr);//构建kdtree用于全局最近邻搜索
 }
 
-bool OptimizedICPGN::Match(const CloudData::CLOUD_PTR &source_cloud_ptr, const Eigen::Matrix4f &predict_pose,
-                           CloudData::CLOUD_PTR &transformed_source_cloud_ptr, Eigen::Matrix4f &result_pose) {
+bool OptimizedICPGN::Match(const pcl::PointCloud<pcl::PointXYZI>::Ptr &source_cloud_ptr,
+                           const Eigen::Matrix4f &predict_pose,
+                           pcl::PointCloud<pcl::PointXYZI>::Ptr &transformed_source_cloud_ptr,
+                           Eigen::Matrix4f &result_pose) {
+    has_converge_ = false;
     source_cloud_ptr_ = source_cloud_ptr;
 
-    CloudData::CLOUD_PTR transformed_cloud(new CloudData::CLOUD);
+    pcl::PointCloud<pcl::PointXYZI>::Ptr transformed_cloud(new pcl::PointCloud<pcl::PointXYZI>);
 
     Eigen::Matrix4f T = predict_pose;
 
@@ -30,14 +31,14 @@ bool OptimizedICPGN::Match(const CloudData::CLOUD_PTR &source_cloud_ptr, const E
         Eigen::Matrix<float, 6, 1> B = Eigen::Matrix<float, 6, 1>::Zero();
 
         for (unsigned int j = 0; j < transformed_cloud->size(); ++j) {
-            const CloudData::POINT &origin_point = source_cloud_ptr->points[j];
+            const pcl::PointXYZI &origin_point = source_cloud_ptr->points[j];
 
             //删除距离为无穷点
             if (!pcl::isFinite(origin_point)) {
                 continue;
             }
 
-            const CloudData::POINT &transformed_point = transformed_cloud->at(j);
+            const pcl::PointXYZI &transformed_point = transformed_cloud->at(j);
             std::vector<float> resultant_distances;
             std::vector<int> indices;
             //在目标点云中搜索距离当前点最近的一个点
@@ -59,7 +60,7 @@ bool OptimizedICPGN::Match(const CloudData::CLOUD_PTR &source_cloud_ptr, const E
             Eigen::Matrix<float, 3, 6> Jacobian = Eigen::Matrix<float, 3, 6>::Zero();
             //构建雅克比矩阵
             Jacobian.leftCols(3) = Eigen::Matrix3f::Identity();
-            Jacobian.rightCols(3) = -T.block<3, 3>(0, 0) * Sophus::SO3f::hat(origin_point_eigen);
+            Jacobian.rightCols(3) = -T.block<3, 3>(0, 0) * Hat(origin_point_eigen);
 
             //构建海森矩阵
             Hessian += Jacobian.transpose() * Jacobian;
@@ -73,7 +74,15 @@ bool OptimizedICPGN::Match(const CloudData::CLOUD_PTR &source_cloud_ptr, const E
         Eigen::Matrix<float, 6, 1> delta_x = Hessian.inverse() * B;
 
         T.block<3, 1>(0, 3) = T.block<3, 1>(0, 3) + delta_x.head(3);
-        T.block<3, 3>(0, 0) *= Sophus::SO3f::exp(delta_x.tail(3)).matrix();
+        T.block<3, 3>(0, 0) *= SO3Exp(delta_x.tail(3)).matrix();
+
+        if (delta_x.norm() < transformation_epsilon_) {
+            has_converge_ = true;
+            break;
+        }
+
+        // debug
+//        std::cout << "i= " << i << "  norm delta x= " << delta_x.norm() << std::endl;
     }
 
     final_transformation_ = T;
@@ -83,13 +92,10 @@ bool OptimizedICPGN::Match(const CloudData::CLOUD_PTR &source_cloud_ptr, const E
     return true;
 }
 
-//该函数用于计算匹配之后的得分,其写法与pcl中的计算icp或者ndt的方式是一致,
-//他们之间的得分可以进行比较
-float OptimizedICPGN::GetFitnessScore() {
-    float max_range = std::numeric_limits<float>::max();
+float OptimizedICPGN::GetFitnessScore(float max_range) const {
     float fitness_score = 0.0f;
 
-    CloudData::CLOUD_PTR transformed_cloud_ptr(new CloudData::CLOUD);
+    pcl::PointCloud<pcl::PointXYZI>::Ptr transformed_cloud_ptr(new pcl::PointCloud<pcl::PointXYZI>);
     pcl::transformPointCloud(*source_cloud_ptr_, *transformed_cloud_ptr, final_transformation_);
 
     std::vector<int> nn_indices(1);
@@ -112,7 +118,18 @@ float OptimizedICPGN::GetFitnessScore() {
         return (std::numeric_limits<float>::max());
 }
 
-bool OptimizedICPGN::HasConverged() {
-    ///TODO: add this function
-    return true;
+bool OptimizedICPGN::HasConverged() const {
+    return has_converge_;
+}
+
+void OptimizedICPGN::SetMaxIterations(unsigned int iter) {
+    max_iterations_ = iter;
+}
+
+void OptimizedICPGN::SetMaxCorrespondDistance(float max_correspond_distance) {
+    max_correspond_distance_ = max_correspond_distance;
+}
+
+void OptimizedICPGN::SetTransformationEpsilon(float transformation_epsilon) {
+    transformation_epsilon_ = transformation_epsilon;
 }
