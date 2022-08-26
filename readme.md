@@ -2,7 +2,7 @@
 
 ```shell
 sudo apt-get install libpcl-dev
-sudo apt-get install libeigen-dev
+sudo apt-get install libeigen3-dev
 ```
 
 ## 2. 编译与运行
@@ -16,7 +16,7 @@ cmake ..
 make -j4
 
 # 运行
-./main
+./optimized_icp
 ```
 
 ## 3. 效果
