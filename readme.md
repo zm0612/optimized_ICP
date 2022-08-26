@@ -21,7 +21,7 @@ make -j4
 
 ## 3. 效果
 
-<img src="/home/meng/codes_my/optimized_ICP/data/icp.png" alt="icp" style="zoom:50%;" />
+<img src="./data/icp.png" alt="icp" style="zoom:50%;" />
 
 ## 4. 算法细节
 
